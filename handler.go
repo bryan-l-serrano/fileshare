@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -23,30 +24,44 @@ func NewHandler(cfg Config) *Handler {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Printf("REQUEST %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+	var status int
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/":
 		http.Redirect(w, r, "/files", http.StatusMovedPermanently)
+		status = http.StatusMovedPermanently
 	case r.Method == http.MethodGet && r.URL.Path == "/files":
 		http.ServeFile(w, r, "./frontend/public/files.html")
+		status = http.StatusOK
 	case r.Method == http.MethodGet && r.URL.Path == "/api/files":
 		h.handleListFiles(w, r)
+		status = 200
 	case r.Method == http.MethodPost && r.URL.Path == "/api/mkdir":
 		h.handleMkdir(w, r)
+		status = 200
 	case r.Method == http.MethodPost && r.URL.Path == "/api/move":
 		h.handleMove(w, r)
+		status = 200
 	case r.Method == http.MethodPost && r.URL.Path == "/api/delete":
 		h.handleDelete(w, r)
+		status = 200
 	case r.Method == http.MethodPost && r.URL.Path == "/api/rmdir":
 		h.handleRmdir(w, r)
+		status = 200
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/download/"):
 		h.handleDownload(w, r)
+		status = 200
 	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/upload"):
 		h.handleUpload(w, r)
+		status = 200
 	case r.Method == http.MethodGet && (strings.HasPrefix(r.URL.Path, "/css/") || strings.HasPrefix(r.URL.Path, "/js/")):
 		http.ServeFile(w, r, "./frontend/public"+r.URL.Path)
+		status = http.StatusOK
 	default:
 		http.NotFound(w, r)
+		status = http.StatusNotFound
 	}
+	log.Printf("RESPONSE %s %s status=%d", r.Method, r.URL.Path, status)
 }
 
 func (h *Handler) handleListFiles(w http.ResponseWriter, r *http.Request) {
@@ -225,10 +240,21 @@ func (h *Handler) handleMove(w http.ResponseWriter, r *http.Request) {
 
 	metaSrc := srcPath + ".meta.json"
 	metaDst := dstPath + ".meta.json"
-	metaData, err := os.ReadFile(metaSrc)
-	if err == nil {
-		_ = os.WriteFile(metaDst, metaData, 0644)
-		_ = os.Remove(metaSrc)
+	metaData, readErr := os.ReadFile(metaSrc)
+	if readErr == nil {
+		var meta struct {
+			OriginalName string `json:"original_name"`
+			Dir          string `json:"dir"`
+		}
+		json.Unmarshal(metaData, &meta)
+		relDir, _ := filepath.Rel(absMP, filepath.Dir(dstPath))
+		if relDir == "." || relDir == "" {
+			relDir = ""
+		}
+		meta.Dir = relDir
+		newMeta, _ := json.Marshal(meta)
+		os.WriteFile(metaDst, newMeta, 0644)
+		os.Remove(metaSrc)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -316,46 +342,100 @@ func (h *Handler) handleRmdir(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 	if len(h.mountPoints) == 0 {
+		log.Printf("DOWNLOAD error: no mount points, url=%s", r.URL.Path)
 		http.Error(w, "no mount points", http.StatusInternalServerError)
 		return
 	}
 	mp := h.mountPoints[0]
 	absMP, err := filepath.Abs(mp.Path)
 	if err != nil {
+		log.Printf("DOWNLOAD error: abs mp=%v, url=%s", err, r.URL.Path)
 		http.Error(w, "invalid mount path", http.StatusInternalServerError)
 		return
 	}
 
 	filename := strings.TrimPrefix(r.URL.Path, "/download/")
+	log.Printf("DOWNLOAD: requested filename=%s absMP=%s", filename, absMP)
 	if filename == "" || strings.Contains(filename, "\\") || strings.Contains(filename, "/") || strings.HasPrefix(filename, ".") {
+		log.Printf("DOWNLOAD error: invalid filename=%s", filename)
 		http.Error(w, "invalid filename", http.StatusBadRequest)
 		return
 	}
 
-	destPath := filepath.Join(absMP, filename)
-	if destPath, err = filepath.Abs(destPath); err != nil {
+	metaSearch := filename + ".meta.json"
+	destPath := ""
+	displayName := filename
+	filepath.WalkDir(absMP, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if filepath.Base(path) == metaSearch {
+			metaData, metaErr := os.ReadFile(path)
+			if metaErr != nil {
+				return nil
+			}
+			var meta struct {
+				OriginalName string `json:"original_name"`
+				Dir          string `json:"dir"`
+			}
+			if json.Unmarshal(metaData, &meta) == nil {
+				displayName = meta.OriginalName
+				if displayName == "" {
+					displayName = filename
+				}
+			}
+			destPath = filepath.Join(filepath.Dir(path), filename)
+			return fmt.Errorf("found")
+		}
+		return nil
+	})
+	if destPath == "" {
+		log.Printf("DOWNLOAD error: file not found filename=%s", filename)
+		http.Error(w, "file not found", http.StatusNotFound)
+		return
+	}
+	destPath, err = filepath.Abs(destPath)
+	if err != nil {
+		log.Printf("DOWNLOAD error: abs path=%v, url=%s", err, r.URL.Path)
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
+	log.Printf("DOWNLOAD: resolved destPath=%s exists=%v", destPath, fileExists(destPath))
 	if !strings.HasPrefix(destPath, absMP) {
 		http.Error(w, "path outside mount point", http.StatusForbidden)
 		return
 	}
 
-	displayName := filename
-	metaPath := destPath + ".meta.json"
-	metaData, err := os.ReadFile(metaPath)
-	if err == nil {
-		var meta struct {
-			OriginalName string `json:"original_name"`
-		}
-		if err := json.Unmarshal(metaData, &meta); err == nil && meta.OriginalName != "" {
-			displayName = meta.OriginalName
-		}
+	if displayName == "" {
+		displayName = filename
 	}
 
-	w.Header().Set("Content-Disposition", "attachment; filename="+displayName)
-	http.ServeFile(w, r, destPath)
+	f, err := os.Open(destPath)
+	if err != nil {
+		log.Printf("DOWNLOAD error: os.Open(%s) failed: %v", destPath, err)
+		http.Error(w, "could not open file", http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		log.Printf("DOWNLOAD error: read failed: %v", err)
+		http.Error(w, "could not read file", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("DOWNLOAD: success size=%d displayName=%s", len(data), displayName)
+	w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''"+displayName)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Write(data)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func (h *Handler) handleUpload(w http.ResponseWriter, r *http.Request) {
@@ -397,26 +477,37 @@ func (h *Handler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	destDir := absMP
 	if dir := r.FormValue("dir"); dir != "" {
 		safe := filepath.Clean(dir)
+		log.Printf("UPLOAD: dir=%s clean=%s isAbs=%v", dir, safe, filepath.IsAbs(safe))
 		if !filepath.IsAbs(safe) {
 			destDir = filepath.Join(absMP, safe)
 		}
 	}
 
 	if destDir, err = filepath.Abs(destDir); err != nil {
+		log.Printf("UPLOAD error: abs=%v", err)
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
+	log.Printf("UPLOAD: destDir=%s", destDir)
 	if !strings.HasPrefix(destDir, absMP) {
 		http.Error(w, "path outside mount point", http.StatusForbidden)
 		return
 	}
 
 	os.MkdirAll(destDir, 0755)
+	log.Printf("UPLOAD: mkdirall %s", destDir)
 
 	uniqueName := uuid.New().String()[:8] + "-" + filename
 	destPath := filepath.Join(destDir, uniqueName)
 
-	metaData, _ := json.Marshal(map[string]string{"original_name": filename})
+	relDir, _ := filepath.Rel(absMP, destDir)
+	if relDir == "." || relDir == "" {
+		relDir = ""
+	}
+	metaData, _ := json.Marshal(map[string]string{
+		"original_name": filename,
+		"dir":           relDir,
+	})
 	os.WriteFile(destPath+".meta.json", metaData, 0644)
 
 	dst, err := os.Create(destPath)

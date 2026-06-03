@@ -40,15 +40,15 @@ if (zone && input && status) {
 
 function renderBreadcrumb() {
   if (!currentPath) {
-    document.getElementById('breadcrumb').innerHTML = '<a class="drop-target" href="#" onclick="navigateTo(\'\')">/</a>';
+    document.getElementById('breadcrumb').innerHTML = '<a class="drop-target" href="#" data-path="" onclick="navigateTo(this.dataset.path)">/</a>';
     return;
   }
   let parts = currentPath.split('/').filter(Boolean);
-  let html = '<a class="drop-target" href="#" onclick="navigateTo(\'\')">/</a>';
+  let html = '<a class="drop-target" href="#" data-path="" onclick="navigateTo(this.dataset.path)">/</a>';
   let accum = '';
   for (const part of parts) {
     accum = accum ? accum + '/' + part : part;
-    html += ' / <a class="drop-target" href="#" onclick="navigateTo(\'' + accum + '\')">' + escapeHtml(part) + '</a>';
+    html += ' / <a class="drop-target" href="#" data-path="' + escapeHtml(accum) + '" onclick="navigateTo(this.dataset.path)">' + escapeHtml(part) + '</a>';
   }
   document.getElementById('breadcrumb').innerHTML = html;
 }
@@ -71,7 +71,7 @@ function renderFiles(files) {
     const size = f.is_dir ? '-' : formatSize(f.size);
     let actions = '';
     if (f.is_dir) {
-      actions = '<a href="#" onclick="navigateTo(\'' + escapeHtml(f.saved_as) + '\')">Open</a>';
+      actions = '<a href="#" onclick="navigateTo(\'' + escapeHtml(currentPath ? currentPath + '/' : '') + escapeHtml(f.saved_as) + '\')">Open</a>';
       actions += ' <button class="delete-btn" onclick="deleteFolder(\'' + escapeJs(f.saved_as) + '\')">Delete</button>';
     } else {
       actions = '<a href="/download/' + escapeHtml(f.saved_as) + '">Download</a>';
@@ -176,7 +176,7 @@ document.addEventListener('DOMContentLoaded', () => {
       body: new URLSearchParams({
         saved_as: data.saved_as,
         src_path: currentPath,
-        dst_path: targetSaved
+        dst_path: currentPath ? currentPath + '/' + targetSaved : targetSaved
       })
     }).then(() => { loadFiles(); });
   });

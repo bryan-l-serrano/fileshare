@@ -4,10 +4,20 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 )
 
 func main() {
+	os.MkdirAll("logs", 0755)
+	logFile, err := os.OpenFile("logs/server.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		log.Fatalf("open log file: %v", err)
+	}
+	defer logFile.Close()
+	log.SetOutput(logFile)
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+
 	cfg, err := LoadConfig("config.yaml")
 	if err != nil {
 		log.Fatalf("load config: %v", err)
