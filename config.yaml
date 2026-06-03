@@ -1,0 +1,7 @@
+port: 8080
+address: 127.0.0.1
+
+mount_points:
+  - path: ./uploads
+    label: "Uploads"
+    max_size_mb: 100

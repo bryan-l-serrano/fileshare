@@ -1,0 +1,9 @@
+{
+  "name": "fileshare-frontend",
+  "version": "1.0.0",
+  "description": "FileShare web frontend",
+  "scripts": {
+    "dev": "echo \"Watch frontend files during development\"",
+    "start": "echo \"Served by Go http.FileServer from ./frontend/public/\""
+  }
+}

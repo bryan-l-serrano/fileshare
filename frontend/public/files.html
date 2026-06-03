@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FileShare - Files</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<h1>FileShare</h1>
+<div id="nav"><a href="/files">Files</a></div>
+<div id="breadcrumb"></div>
+<div id="toolbar">
+  <input type="text" id="new-folder-name" placeholder="New folder name">
+  <button onclick="createFolder()">Create Folder</button>
+</div>
+<div id="drop-zone">
+  <p>Drag &amp; drop files here to upload, or click to select</p>
+  <input type="file" id="upload-btn" multiple>
+</div>
+<div id="status"></div>
+<div id="loading">Loading...</div>
+<div id="content"></div>
+
+<script src="/js/files.js"></script>
+</body>
+</html>
