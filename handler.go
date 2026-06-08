@@ -48,6 +48,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && r.URL.Path == "/api/rmdir":
 		h.handleRmdir(w, r)
 		status = 200
+	case r.Method == http.MethodPost && r.URL.Path == "/api/rename":
+		h.handleRename(w, r)
+		status = 200
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/download/"):
 		h.handleDownload(w, r)
 		status = 200
@@ -254,6 +257,69 @@ func (h *Handler) handleMove(w http.ResponseWriter, r *http.Request) {
 		meta.Dir = relDir
 		newMeta, _ := json.Marshal(meta)
 		os.WriteFile(metaDst, newMeta, 0644)
+		os.Remove(metaSrc)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (h *Handler) handleRename(w http.ResponseWriter, r *http.Request) {
+	if len(h.mountPoints) == 0 {
+		http.Error(w, "no mount points", http.StatusInternalServerError)
+		return
+	}
+	mp := h.mountPoints[0]
+	absMP, err := filepath.Abs(mp.Path)
+	if err != nil {
+		http.Error(w, "invalid mount path", http.StatusInternalServerError)
+		return
+	}
+
+	savedName := r.FormValue("saved_as")
+	if savedName == "" || strings.Contains(savedName, "\\") || strings.Contains(savedName, "/") || strings.HasPrefix(savedName, ".") {
+		http.Error(w, "invalid source", http.StatusBadRequest)
+		return
+	}
+
+	newName := r.FormValue("new_name")
+	if newName == "" || strings.Contains(newName, "\\") || strings.Contains(newName, "/") || strings.HasPrefix(newName, ".") {
+		http.Error(w, "invalid name", http.StatusBadRequest)
+		return
+	}
+
+	filePath := r.FormValue("path")
+	srcPath := filepath.Join(absMP, filePath, savedName)
+	if srcPath, err = filepath.Abs(srcPath); err != nil {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	if !strings.HasPrefix(srcPath, absMP) {
+		http.Error(w, "path outside mount point", http.StatusForbidden)
+		return
+	}
+
+	dstPath := filepath.Join(absMP, filePath, newName)
+	if dstPath, err = filepath.Abs(dstPath); err != nil {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	if !strings.HasPrefix(dstPath, absMP) {
+		http.Error(w, "path outside mount point", http.StatusForbidden)
+		return
+	}
+
+	if err := os.Rename(srcPath, dstPath); err != nil {
+		log.Printf("rename error: %v", err)
+		http.Error(w, "could not rename", http.StatusInternalServerError)
+		return
+	}
+
+	metaSrc := srcPath + ".meta.json"
+	metaDst := dstPath + ".meta.json"
+	metaData, err := os.ReadFile(metaSrc)
+	if err == nil {
+		os.WriteFile(metaDst, metaData, 0644)
 		os.Remove(metaSrc)
 	}
 

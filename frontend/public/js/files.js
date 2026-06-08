@@ -72,10 +72,17 @@ function renderFiles(files) {
     let actions = '';
     if (f.is_dir) {
       actions = '<a href="#" onclick="navigateTo(\'' + escapeHtml(currentPath ? currentPath + '/' : '') + escapeHtml(f.saved_as) + '\')">Open</a>';
-      actions += ' <button class="delete-btn" onclick="deleteFolder(\'' + escapeJs(f.saved_as) + '\')">Delete</button>';
+      actions += ' <button class="rename-btn" onclick="renameFolder(\'' + escapeJs(f.saved_as) + '\')">Rename</button>';
+     actions += ' <button class="delete-btn" onclick="deleteFolder(\'' + escapeJs(f.saved_as) + '\')">Delete</button>';
     } else {
-      actions = '<a href="/download/' + escapeHtml(f.saved_as) + '">Download</a>';
-      actions += ' <button class="delete-btn" onclick="deleteFile(\'' + escapeJs(f.saved_as) + '\')">Delete</button>';
+      const isImage = /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)$/i.test(f.name);
+      if (isImage) {
+        actions = '<a href="#" onclick="previewImage(\'' + escapeJs(f.saved_as) + '\')">View</a>';
+      } else {
+        actions = '<a href="/download/' + escapeHtml(f.saved_as) + '">Download</a>';
+      }
+      actions += ' <button class="rename-btn" onclick="renameFile(\'' + escapeJs(f.saved_as) + '\')">Rename</button>';
+       actions += ' <button class="delete-btn" onclick="deleteFile(\'' + escapeJs(f.saved_as) + '\')">Delete</button>';
     }
     const dragClass = f.is_dir ? 'drop-target' : 'drag-source';
     const draggableAttr = f.is_dir ? '' : 'draggable="true"';
@@ -132,6 +139,41 @@ async function deleteFolder(folderName) {
   });
   if (!res.ok) { alert('Could not delete folder'); return; }
   loadFiles();
+}
+
+async function renameFile(savedAs) {
+  const newName = prompt('Enter new name for ' + savedAs + ':');
+  if (!newName || newName === savedAs) return;
+  const res = await fetch('/api/rename', {
+    method: 'POST',
+    body: new URLSearchParams({ saved_as: savedAs, new_name: newName, path: currentPath })
+  });
+  if (!res.ok) { alert('Could not rename file'); return; }
+  loadFiles();
+}
+
+async function renameFolder(savedAs) {
+  const newName = prompt('Enter new name for ' + savedAs + ':');
+  if (!newName || newName === savedAs) return;
+  const res = await fetch('/api/rename', {
+    method: 'POST',
+    body: new URLSearchParams({ saved_as: savedAs, new_name: newName, path: currentPath })
+  });
+  if (!res.ok) { alert('Could not rename folder'); return; }
+  loadFiles();
+}
+
+function previewImage(savedAs) {
+  const modal = document.getElementById('image-modal');
+  if (!modal) return;
+  modal.querySelector('img').src = '/download/' + savedAs;
+  modal.querySelector('.modal-title').textContent = savedAs;
+  modal.style.display = 'flex';
+}
+
+function closeModal() {
+  const modal = document.getElementById('image-modal');
+  if (modal) modal.style.display = 'none';
 }
 
 document.addEventListener('DOMContentLoaded', () => {
